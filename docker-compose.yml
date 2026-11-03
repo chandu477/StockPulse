@@ -1,0 +1,171 @@
+# StockPulse local stack (SE-03).
+#
+# All configuration comes from .env (copy .env.example to .env first). No secrets are written in this file.
+#
+#   docker compose up -d --build                       # postgres + rabbitmq + backend (default services)
+#   docker compose --profile frontend up               # + Angular 17 dev server on Node 20 (after FE-01)
+#   docker compose --profile ai-local up -d            # + Ollama (local LLM)
+#   docker compose --profile llm-sim up -d             # + WireMock LLM simulator (QA failure injection)
+#   docker compose run --rm ng <angular-cli args>      # Angular CLI 17 on Node 20, no Node 20 needed on the host
+#
+# Profiles can also be enabled with COMPOSE_PROFILES in .env (e.g. COMPOSE_PROFILES=frontend,ai-local).
+# Backend log files appear on the host in backend/logs/ (bind mount).
+
+name: stockpulse
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-stockpulse}
+      POSTGRES_USER: ${POSTGRES_USER:-stockpulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-stockpulse}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env (see .env.example)}
+    ports:
+      - "${RABBITMQ_PORT_HOST:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  backend:
+    build:
+      context: ./backend
+    image: stockpulse-backend:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: postgres
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-stockpulse}
+      DB_USERNAME: ${POSTGRES_USER:-stockpulse}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}
+      # stockpulse.logging.dir inside the container; bind-mounted to backend/logs on the host.
+      STOCKPULSE_LOGGING_DIR: /app/logs
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      LLM_MODEL: ${LLM_MODEL:-llama3.1:8b}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      STOCKPULSE_CORS_ALLOWED_ORIGINS: ${STOCKPULSE_CORS_ALLOWED_ORIGINS:-http://localhost:4200}
+      STOCKPULSE_MESSAGING_MODE: rabbitmq
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-stockpulse}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    volumes:
+      - ./backend/logs:/app/logs
+
+  # Angular 17 dev server. Angular 17 supports Node 18.13+/20.9+, not Node 24, so it runs on node:20 here and the
+  # host can keep Node 24. Built from frontend/Dockerfile.dev (node:20-alpine + Chromium).
+  # The proxy file defaults to proxy.docker.conf.json (/api -> http://backend:8080). To run against the Prism mock
+  # instead (no backend needed):
+  #   FRONTEND_PROXY=proxy.mock.conf.json docker compose --profile mock --profile frontend up --no-deps frontend mock-api
+  frontend:
+    profiles: ["frontend"]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    image: stockpulse-frontend-dev:local
+    working_dir: /app
+    command: sh -c "npm ci && ng serve --host 0.0.0.0 --port 4200 --poll 2000 --proxy-config ${FRONTEND_PROXY:-proxy.docker.conf.json}"
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-4200}:4200"
+    volumes:
+      - ./frontend:/app
+      # Named volume: Linux-native node_modules, fast, and not shared with the Windows host.
+      - frontend_node_modules:/app/node_modules
+
+  # Angular CLI 17 on Node 20, for scaffolding, tests, lint and builds without Node 20 on the host.
+  #   docker compose run --rm ng generate component features/products/components/product-table
+  #   docker compose run --rm --entrypoint npm ng run lint
+  #   docker compose run --rm --entrypoint npm ng test -- --watch=false --browsers=ChromeHeadlessCI
+  ng:
+    profiles: ["tools"]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    image: stockpulse-frontend-dev:local
+    working_dir: /app
+    entrypoint: ["ng"]
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+
+  # Prism mock server for contracts/openapi.yaml (FE work without the backend). Serves /api/v1/... on port 4010.
+  # Use with proxy.mock.conf.json (see the frontend service above).
+  mock-api:
+    profiles: ["mock"]
+    image: stoplight/prism:5
+    command: mock -h 0.0.0.0 -p 4010 /contracts/openapi.yaml
+    ports:
+      - "${MOCK_API_PORT:-4010}:4010"
+    volumes:
+      - ./contracts:/contracts:ro
+
+  # Local LLM. Set LLM_PROVIDER=ollama and LLM_BASE_URL=http://ollama:11434, then pull a model once:
+  #   docker compose exec ollama ollama pull llama3.1:8b
+  ollama:
+    profiles: ["ai-local"]
+    image: ollama/ollama:0.40.14
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+
+  # QA LLM simulator (WireMock) for failure injection (QA-03). Stubs live in qa/llm-simulator/mappings.
+  # Point the backend at it with LLM_BASE_URL=http://llm-sim:8080 (container port 8080, host port 8089).
+  llm-sim:
+    profiles: ["llm-sim"]
+    image: wiremock/wiremock:3.13.2
+    command: ["--global-response-templating", "--verbose"]
+    ports:
+      - "${LLM_SIM_PORT:-8089}:8080"
+    volumes:
+      - ./qa/llm-simulator:/home/wiremock
+
+  # Reserved (FE-01 / release, not built now): production frontend image.
+  # nginx serving the Angular production build, with /api proxied to http://backend:8080.
+  # frontend-prod:
+  #   profiles: ["prod-frontend"]
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile        # multi-stage: node:20 build -> nginx:alpine
+  #   depends_on:
+  #     - backend
+  #   ports:
+  #     - "8081:80"
+
+volumes:
+  pgdata:
+  rabbitmqdata:
+  frontend_node_modules:
+  ollama_models:

@@ -1,0 +1,40 @@
+# Logs (written at runtime, never committed)
+**/logs/*.log
+**/logs/*.log.*
+**/logs/*.gz
+
+# Secrets
+.env
+*.env.local
+
+# Backend
+backend/target/
+backend/.mvn/wrapper/maven-wrapper.jar
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+
+# E2E
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+
+# Secrets (extended by SE-03)
+.env.*
+!.env.example
+
+# Backend extras
+backend/HELP.md
+
+# Local tool settings
+.claude/settings.local.json
