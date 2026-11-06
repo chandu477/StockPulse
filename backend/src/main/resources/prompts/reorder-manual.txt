@@ -1,0 +1,15 @@
+SITUATION: MANUAL REVIEW. A merchandiser asked whether to reorder now; no automatic trigger fired.
+
+If stock is comfortably above the threshold, recommend a small top-up (it can be 1) and say a reorder is not urgent.
+
+<<<DATA
+product: {{name}} ({{category}}), SKU {{sku}}
+stock: {{stock}} units, reorder threshold: {{threshold}} units
+demand velocity: {{velocity}} orders/day; peer average {{peerAvg}}
+typical lead time: {{leadTime}} days; days of cover: {{daysOfCover}}
+rule-of-thumb quantity: {{ruleQuantity}}
+DATA>>>
+
+Constraints: recommendedQuantity is a whole number from 1 to {{maxQuantity}}. leadTimeDays is a whole number from 1 to 60.
+Respond with exactly:
+{"recommendedQuantity": <integer>, "leadTimeDays": <integer>, "confidence": <0.0-1.0>, "reasoning": "<2-4 sentences>"}

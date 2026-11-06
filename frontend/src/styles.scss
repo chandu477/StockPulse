@@ -1,0 +1,110 @@
+@use '@angular/material' as mat;
+@use 'tokens';
+
+html {
+  color-scheme: light dark;
+  @include mat.theme(
+    (
+      color: (
+        primary: mat.$blue-palette,
+      ),
+      typography: Inter,
+      density: -2,
+    )
+  );
+  // White & blue: blue filled buttons, no elevation.
+  @include mat.button-overrides(
+    (
+      filled-container-color: var(--sp-accent),
+      filled-label-text-color: var(--sp-accent-fg),
+      filled-container-shape: var(--sp-radius),
+      text-label-text-color: var(--sp-accent),
+      text-container-shape: var(--sp-radius),
+      outlined-label-text-color: var(--sp-accent),
+      outlined-outline-color: var(--sp-border-strong),
+      outlined-container-shape: var(--sp-radius),
+    )
+  );
+  @include mat.progress-bar-overrides(
+    (
+      active-indicator-color: var(--sp-accent),
+      track-color: var(--sp-border),
+      active-indicator-height: 2px,
+      track-height: 2px,
+    )
+  );
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--sp-surface);
+  color: var(--sp-text);
+  font-family: var(--sp-font);
+  font-size: var(--sp-text-md);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--sp-focus);
+  outline-offset: 2px;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.mono {
+  font-family: var(--sp-font-mono);
+  font-size: var(--sp-text-xs);
+}
+
+.muted {
+  color: var(--sp-text-muted);
+}
+
+.sp-input {
+  height: 32px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--sp-border-strong);
+  border-radius: var(--sp-radius-sm);
+  background: var(--sp-bg);
+  color: var(--sp-text);
+  font: inherit;
+  font-size: var(--sp-text-sm);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

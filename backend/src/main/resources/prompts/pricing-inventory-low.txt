@@ -1,0 +1,20 @@
+SITUATION: INVENTORY LOW. Stock has fallen below the reorder threshold.
+
+This is a genuinely ambiguous merchandising decision. Weigh these options explicitly:
+1. RAISE the price to slow sales and protect scarce units until replenishment arrives (good when demand is healthy or above peers and stock would sell out before restock).
+2. CLEARANCE (lower the price) to move units (only sensible when demand is weak relative to peers, i.e. the stock is low but sitting, and holding it has a cost).
+3. HOLD when the signals conflict or the change would not matter.
+Use days of cover versus the restock lead time: if cover is shorter than the lead time, a sell-out is likely.
+
+<<<DATA
+product: {{name}} ({{category}}), SKU {{sku}}
+current price: {{price}} INR
+cost price: {{costPrice}} INR
+stock: {{stock}} units, reorder threshold: {{threshold}} units ({{stockVsThreshold}} of threshold)
+demand velocity: {{velocity}} orders/day; {{category}} peer average: {{peerAvg}} ({{peerCount}} peers); this product is {{velocityMultiple}}x its peers
+days of cover at current velocity: {{daysOfCover}}; typical restock lead time: {{leadTime}} days
+DATA>>>
+
+Constraints: recommendedPrice must be between {{minPrice}} and {{maxPrice}}. If direction is HOLD, recommendedPrice must equal {{price}}.
+Respond with exactly:
+{"recommendedPrice": <number, 2 decimals>, "direction": "INCREASE" | "DECREASE" | "HOLD", "confidence": <0.0-1.0>, "reasoning": "<2-4 sentences naming the trade-off: protect stock vs clearance vs hold>"}

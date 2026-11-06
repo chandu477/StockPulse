@@ -1,0 +1,16 @@
+SITUATION: MANUAL REVIEW. A merchandiser asked for a price check; no automatic trigger fired.
+
+Review the current price against stock position and demand relative to peers. Prefer HOLD unless there is a clear reason to move; explain what would change your mind.
+
+<<<DATA
+product: {{name}} ({{category}}), SKU {{sku}}
+current price: {{price}} INR
+cost price: {{costPrice}} INR
+stock: {{stock}} units, reorder threshold {{threshold}}
+demand velocity: {{velocity}} orders/day; {{category}} peer average {{peerAvg}} ({{peerCount}} peers): {{velocityMultiple}}x peers
+days of cover: {{daysOfCover}}
+DATA>>>
+
+Constraints: recommendedPrice must be between {{minPrice}} and {{maxPrice}}. If direction is HOLD, recommendedPrice must equal {{price}}.
+Respond with exactly:
+{"recommendedPrice": <number, 2 decimals>, "direction": "INCREASE" | "DECREASE" | "HOLD", "confidence": <0.0-1.0>, "reasoning": "<2-4 sentences>"}

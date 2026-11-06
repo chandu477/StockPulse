@@ -6,19 +6,20 @@ All ADRs below were recorded in SE-01 on 2026-11-03. They rest on the proposed d
 
 | ADR | Title | Status |
 |---|---|---|
-| [ADR-1](#adr-1-modular-monolith-with-enforced-module-boundaries) | Modular monolith with enforced module boundaries | Accepted |
+| [ADR-1](#adr-1-flat-layered-monolith) | Flat layered monolith | Accepted |
 | [ADR-2](#adr-2-split-pricing-and-reorder-contracts-with-two-parallel-ai-calls) | Split pricing and reorder contracts, two parallel AI calls | Accepted (Q-14 default) |
 | [ADR-3](#adr-3-runtime-strategy-switching-via-a-bean-map-registry-and-a-persisted-setting) | Runtime strategy switching via a bean-map registry | Accepted (Q-11 default) |
-| [ADR-4](#adr-4-llm-failure-handling-decorator-fallback-validation-timeouts-circuit-breaker-budget) | LLM failure handling | Accepted (prompt sign-off by SE-05 pending) |
-| [ADR-5](#adr-5-agentic-loop-transactional-outbox--rabbitmq-level-triggered-idempotent-consumer) | Agentic loop: transactional outbox → RabbitMQ, idempotent consumer | Accepted (revised 2026-11-03; Q-7 default) |
+| [ADR-4](#adr-4-llm-failure-handling-decorator-fallback-validation-timeouts-circuit-breaker-budget) | LLM failure handling | Accepted · implemented; prompts signed off (SE-05) |
+| [ADR-5](#adr-5-agentic-loop-transactional-outbox--rabbitmq-level-triggered-idempotent-consumer) | Agentic loop: transactional outbox → RabbitMQ, idempotent consumer | Accepted · implemented 2026-11-06 (SKIP LOCKED deferred) |
 | [ADR-6](#adr-6-extensibility-seams-and-deliberate-exclusions) | Extensibility seams and deliberate exclusions | Accepted |
-| [ADR-7](#adr-7-derived-product-status-and-the-superseded-suggestion-status) | Derived product status, plus `SUPERSEDED` | Accepted (Q-8, Q-9 defaults) |
-| [ADR-8](#adr-8-angular-17-with-signals--services-no-ngrx-polling-for-refresh) | Angular 17 with signals + services, no NgRx, polling | Accepted |
+| [ADR-7](#adr-7-derived-product-status-and-the-superseded-suggestion-status) | Derived product status, plus `SUPERSEDED` | Accepted · revised 2026-11-06 (one recommendation per product) |
+| [ADR-8](#adr-8-angular-19-with-signals--services-no-ngrx-polling-for-refresh) | Angular 19 with signals + services, no NgRx, polling | Accepted (revised 2026-11-06) |
 | [ADR-9](#adr-9-one-standard-error-response-and-backend-only-file-logging) | One standard error response; backend-only file logging | Accepted |
+| [ADR-10](#adr-10-free-tier-llm-provider-groq-default-ollama-offline) | Free-tier LLM provider: Groq default, Ollama offline | Accepted (2026-11-06) |
 
 ---
 
-## ADR-1: Modular monolith with enforced module boundaries
+## ADR-1: Flat layered monolith
 
 **Status:** Accepted · 2026-11-03
 
@@ -27,20 +28,20 @@ All ADRs below were recorded in SE-01 on 2026-11-03. They rest on the proposed d
 **Options.**
 1. **Microservices** (catalog, inventory, recommendation, approval as separate deployables, talking over HTTP or a broker).
 2. **Flat layered monolith** (one `controller` / `service` / `repository` package set for everything).
-3. **Modular monolith**: one Spring Boot deployable, packages per bounded context (`catalog`, `inventory`, `recommendation`, `approval`, `integration.llm`, `shared`), with boundaries enforced by ArchUnit.
+3. **Flat layered monolith**: one Spring Boot deployable with shared `controller`, `service`, and `entity` packages. Descriptive class names identify the business feature.
 
-**Decision.** Option 3. Module rules (plan §C.3), enforced by ArchUnit tests (SE-04):
-- `catalog` depends on nothing domain-specific; `inventory` → `catalog`; `recommendation` → `catalog` (read-only `ProductView`) + `shared`; `approval` → `catalog`, `inventory`, `recommendation`.
-- Only `recommendation.ai` may import `integration.llm`.
-- Controllers never call another module's repositories.
+**Decision.** Option 3, following the team's layer-first folder convention. ArchUnit tests (SE-04) enforce these rules:
+- Controllers do not depend on messaging or AI-provider infrastructure.
+- Entities do not depend on controllers, services, messaging, or integrations.
+- Only recommendation AI code may import `integration.llm`.
 - Commerce logic lives in strategies and `RecommendationService`, never in controllers or entities. HTTP and async callers share `RecommendationService` ("two callers, one interface").
 
 **Trade-offs.**
 - (+) One build, one deploy, one transaction manager: atomic accept (price update + status) is a local transaction, not a saga.
-- (+) Boundaries are still real and testable, so a module can be extracted later along a known seam.
+- (+) The role of each file is immediately visible from its folder, matching the team's existing convention.
 - (−) No independent scaling. Acceptable at this load (§A success metrics).
-- (−) In-process events are lost if the JVM crashes after commit (mitigated in ADR-5; outbox in ADR-6 exclusions).
-- (−) Boundary discipline depends on ArchUnit staying in CI.
+- (−) Cross-module async work needs a durable hand-off; solved by the transactional outbox + RabbitMQ (ADR-5), not by in-process events.
+- (−) Feature boundaries are no longer encoded in package names; descriptive class names and review discipline carry more weight. ArchUnit enforces layer boundaries, not feature isolation.
 
 ---
 
@@ -63,6 +64,12 @@ All ADRs below were recorded in SE-01 on 2026-11-03. They rest on the proposed d
 - (−) Two LLM calls per trigger, roughly double the token cost. Acceptable because suggestions are event-driven and de-duplicated before the call (ADR-5), not per page view, and capped by the budget (ADR-4).
 - (≈) Latency is about one call, because the calls run in parallel.
 
+
+**Implementation (2026-11-06).** `recommendation/strategy/{PricingStrategy,ReorderStrategy}` with `PricingAdvice` / `ReorderAdvice` records; `RecommendationService` runs both on a bounded `strategyExecutor` in parallel (`CompletableFuture`), outside any transaction. With Groq `gpt-oss-20b` one call takes about 0.8 s, so a trigger produces both suggestions in about 2 s end to end.
+
+
+**Note (2026-11-06).** The contracts stay split (independent validation and fallback per type). The *presentation* is unified: the console groups the product's pending price and restock suggestion into one recommendation card (ADR-7 revision).
+
 ---
 
 ## ADR-3: Runtime strategy switching via a bean-map registry and a persisted setting
@@ -83,6 +90,9 @@ All ADRs below were recorded in SE-01 on 2026-11-03. They rest on the proposed d
 - (+) Adding a strategy is just a new `@Component("key")` bean (ADR-6).
 - (−) In a multi-instance deployment, other instances only see the change after they re-read `app_settings`. Single instance in the MVP; a short cache TTL or a change event is the production follow-up.
 - (−) The admin endpoint must be protected in production (`ADMIN` role, Q-13).
+
+
+**Implementation (2026-11-06).** `recommendation/strategy/StrategyRegistry` indexes beans by their `key()` method rather than by bean name: the pricing and reorder rule strategies are both `"rule"`, and two beans with the same name would clash. Active keys live in `app_settings` (`strategy.pricing`, `strategy.reorder`), cached in `shared/settings/RuntimeSettings`. Exposed at `GET/PUT /api/v1/admin/strategies` and as the top-bar switch in the console. Verified by `AgenticLoopIT.failingStrategyFallsBackToRulesAndIsSwitchableAtRuntime` (a test-only third strategy is registered with no other code change).
 
 ---
 
@@ -112,6 +122,22 @@ All ADRs below were recorded in SE-01 on 2026-11-03. They rest on the proposed d
 - (+) The worst case for a manual suggest is bounded at about 10.5 s (Q-17).
 - (−) A fallback suggestion may be lower quality than a retried AI answer. Accepted: an explainable rule suggestion beats no suggestion.
 - (−) Several moving parts (breaker, budget, retry) need targeted tests (QA-03).
+
+
+**Implementation (2026-11-06).**
+- `integration/llm/LlmGateway`: JDK `HttpClient` with connect 2 s / read 10 s; `CallBudget` (sliding minute, 30 calls); Resilience4j breaker (50% of 20 calls, open 30 s); OpenAI-compatible JSON mode for Groq/Ollama, `responseMimeType` for Gemini. Never logs the prompt or the key (`LlmProperties.toString()` masks it).
+- `recommendation/ai/AiAdvisor` → `AdviceParser` (fences/prose tolerant, strict JSON) → `AdviceValidator` (bounds, direction consistency, confidence in [0,1], integer quantity 1..max, lead time 1..60, non-blank reasoning).
+- `AiPricingStrategy` / `AiReorderStrategy` (key `"ai"`) are the fallback decorators: any failure → rule advice with `source=RULE_FALLBACK`, `fallbackReason`, an `LLM_FALLBACK` WARN log and the `stockpulse.llm.fallback{reason,type}` metric.
+- **Added reason `NOT_CONFIGURED`**: AI selected but no key/model, so no network call is made.
+- **Deviation: the single jittered retry on 429/503 is deferred.** The fallback already guarantees a suggestion, and on a free tier a retry doubles quota use exactly when the provider is throttling.
+- Tests: `AdviceParsingAndValidationTest` (19 cases incl. $0, $999,999, HOLD-with-change, 1.5 units, confidence 1.7), `LlmGatewayTest` (429/503/empty/timeout/budget/breaker), `AiAdvisorIT` (8 failure modes → exact `fallbackReason`).
+
+**SE-05 prompt-design sign-off (2026-11-06).** `src/main/resources/prompts/`: one system prompt + six templates ({pricing, reorder} × {inventory-low, demand-spike, manual}). They differ in the decision asked, not just a field:
+- *pricing-inventory-low* frames the AGT-2 ambiguity explicitly (raise to protect scarce stock **vs** clearance when demand is weak vs peers **vs** hold) and gives days of cover against restock lead time.
+- *pricing-demand-spike* gives the velocity multiple vs peers and the spike threshold, warns that spikes can be short-lived, asks for a modest goodwill-safe increase sized to stock headroom.
+- *reorder-** size to cover target and lead-time demand; the spike variant warns about committing to a fading spike.
+- Every template states the allowed price range / quantity range, so valid answers are possible and invalid ones are rejected by the validator. Product text is sanitised and fenced in a `<<<DATA … DATA>>>` block (`PromptLibraryTest` proves it cannot break out).
+- Observed on real Groq output: low stock → *"protect scarce inventory by raising the price, trading off short-term revenue for stock availability"*; spike → *"Spike 3.3x peers, stock only 1 unit, so a 10% bump maximises revenue while staying within goodwill limits"*; reorder → explicit lead-time arithmetic (45 target + 91 lead-time demand − 7 on hand = 129).
 
 ---
 
@@ -164,6 +190,17 @@ All ADRs below were recorded in SE-01 on 2026-11-03. They rest on the proposed d
 - (−) Slightly higher latency than in-process events (one broker hop, typically milliseconds). The 5 s sweep only matters during failures.
 - (−) Two messaging modes must both be tested. `in-process` exists only for the zero-setup local run.
 
+
+**Implementation (2026-11-06).**
+- Write: `service/InventoryService` + `service/OutboxWriter`, in one transaction.
+- Relay: `messaging/RabbitOutboxRelay` (AFTER_COMMIT trigger + 5 s sweep; `CorrelationData` confirm + mandatory routing; `messageId` = outbox id, `traceId` header).
+- Topology: `messaging/RabbitMessagingConfig` (`stockpulse.inventory` → `recommendation.requests`, DLX `recommendation.dlx` → `recommendation.dlq`).
+- Consumer: `messaging/RabbitRecommendationListener` → `service/RecommendationRequestHandler` (shared with `InProcessOutboxDispatcher`).
+- Retries: Spring AMQP stateless retry 3 attempts (1 s → 2 s → 4 s), then a `MessageRecoverer` that logs `MESSAGE_DEAD_LETTERED` and rejects without requeue.
+- Duplicate PENDING prevention under concurrency: product row lock in the write phase + `pending_key` unique constraint (`AgenticLoopIT.concurrentOrdersProduceExactlyOnePendingPair`, 12 parallel orders).
+- Verified on `docker compose up` (PostgreSQL 16 + RabbitMQ 3.13): order 201 in about 40 ms; AI suggestions visible about 2 s later; 11/11 outbox rows PUBLISHED; DLQ empty.
+- **Deviation: `SELECT … FOR UPDATE SKIP LOCKED` row claiming for multiple relay instances is deferred** (single instance in the MVP). A double publish is harmless because the consumer is idempotent. A Testcontainers test for redelivery/DLQ/broker-down is still open (QA-04).
+
 ---
 
 ## ADR-6: Extensibility seams and deliberate exclusions
@@ -201,6 +238,17 @@ All ADRs below were recorded in SE-01 on 2026-11-03. They rest on the proposed d
 - (−) The `PriceGuardrail` interface has one implementation in the MVP. Justified only because it is a declared extension seam.
 - (−) Each exclusion is a known limitation to explain in the walkthrough (especially no auth in the demo).
 
+
+**Where the seams are in code (2026-11-06).**
+| Sprint 2 item | Plug-in point | Change needed |
+|---|---|---|
+| `CompetitorAwareStrategy` | `recommendation/strategy/PricingStrategy` | New `@Component` class with `key() = "competitor"`; it appears in `GET /admin/strategies` and the UI switch |
+| Margin floor | `recommendation/guardrail/PriceGuardrail` chain (today `BoundsGuardrail`) + `Product.marginFloor` / `costPrice` (`V1__catalog.sql`) | New `MarginFloorGuardrail` bean; no strategy changes |
+| Category price caps | Same `PriceGuardrail` chain | New `CategoryCapGuardrail` bean |
+| Supplier catalog | `Product.supplierId`, `ReorderAdvice` | Reorder strategy reads the supplier; add a `supplierId` field to the reorder contract (contract change) |
+| Rolling 24 h velocity | `inventory_events` table (every ORDER/ADJUST/INBOUND recorded) | Recompute velocity from events instead of the counter |
+| Price-change cooldown | `RecommendationService` phase 1 | Check the last ACCEPTED pricing suggestion's `decidedAt` |
+
 ---
 
 ## ADR-7: Derived product status, and the `SUPERSEDED` suggestion status
@@ -224,27 +272,48 @@ All ADRs below were recorded in SE-01 on 2026-11-03. They rest on the proposed d
 - (−) `SUPERSEDED` is a state that isn't in the brief. If the stakeholder declines Q-9, the fallback is to leave siblings PENDING with a UI "stale" flag, and this ADR is revised.
 - (−) Status is recomputed on every write (a cheap pending-count query).
 
+
+**Revision (2026-11-06, product-owner decision): one recommendation per product.**
+- *Context:* the console showed several cards for one product (separate price and restock cards, and a second pair when a different trigger fired). The merchandiser wants one recommendation per product, recalculated when the situation changes.
+- *Decision:*
+  - At most **one PENDING pricing and one PENDING reorder suggestion per product**: `pending_key` is now the product id (`V8__one_pending_per_product.sql` superseded older duplicates).
+  - The **same trigger again is de-duplicated**, so there is no extra LLM call per sale.
+  - A **different trigger**, or an explicit **Recalculate** (`POST /suggest-pricing` / `/suggest-reorder`, now always `201`), generates fresh advice against current stock and price and marks the previous one `SUPERSEDED` ("Superseded by a recalculated recommendation").
+  - When both triggers fire on one event, **DEMAND_SPIKE wins**, because its prompt also weighs stock headroom (`RecommendationRequestHandler.primary`).
+  - The UI shows price + restock as **one card** with per-line and **Accept all / Reject all** actions.
+- *Trade-offs:*
+  - (+) One clear decision per product, and a pending suggestion never reflects stale numbers after the trigger changes.
+  - (−) A recalculation discards the previous advice: it stays visible as `SUPERSEDED` in history, but cannot be accepted.
+  - (−) Accept all is two API calls (price, then restock), not one transaction. If the second fails, the first stays accepted and the card shows what is left; an atomic endpoint would be a contract change.
+- Tests: `AgenticLoopIT.recalculateReplacesThePendingSuggestion`, `aDifferentTriggerRecalculatesIntoOneRecommendation`, `concurrentOrdersProduceExactlyOnePendingPair`; `PrimaryTriggerTest`.
+
 ---
 
-## ADR-8: Angular 17 with signals + services, no NgRx; polling for refresh
+## ADR-8: Angular 19 with signals + services, no NgRx; polling for refresh
 
-**Status:** Accepted · 2026-11-03
+**Status:** Accepted · 2026-11-03 · **Revised 2026-11-06:** Angular 17 → 19 (product-owner decision)
 
-**Context.** The console has two pages and a small state (products, pending pricing, pending reorder, loading, error, last updated). New suggestions arrive asynchronously, within seconds of an order. The brief requires Angular 17.
+**Context.** The console has two pages and a small state (products, pending pricing, pending reorder, loading, error, last updated). New suggestions arrive asynchronously, within seconds of an order. The brief names "React 18 or Angular 17" and asks for the choice to be documented here. Angular 17 is past end of support, and its CLI does not support current Node versions. The development host runs Node 26.
 
 **Options.**
-1. **NgRx Store** (actions, reducers, effects, selectors).
-2. **NgRx SignalStore**.
-3. **Signals + feature store services** (`signal`/`computed`, HTTP in RxJS, bridged with `toSignal`).
-4. Refresh: **WebSocket / SSE push** vs **polling**.
+1. **Angular 17** as named in the brief: end of support, and signal inputs are only in developer preview.
+2. **Angular 19**: standalone by default, `input()`/`output()`/`model()` and `@let` stable, Material 19 `mat.theme()` M3 tokens; supports Node 18.19 / 20.11 / 22.
+3. Angular 20+: supports newer Node, but it is a larger jump from the brief and not what the product owner asked for.
+4. State: **NgRx Store**, **NgRx SignalStore**, or **signals + feature store services**. Refresh: **WebSocket/SSE push** or **polling**.
 
-**Decision.** Option 3, and polling: `PollingService` uses `timer(0, 5000)` + `switchMap`, pauses when the tab is hidden, and backs off exponentially on errors. Standalone components, `OnPush` everywhere, built-in control flow with `track`, `@Input()`/`@Output()` (signal inputs are developer preview in 17).
+**Decision.** Angular 19 + signals + feature store services + polling.
+- Tooling runs on **Node 22 in Docker** (`frontend/Dockerfile.dev` from `node:22-alpine` + Chromium), so the host Node version doesn't matter. On the host, `nvm use 22` is the alternative.
+- Standalone components (the default in 19, no `standalone: true`), `OnPush` everywhere, built-in control flow with `track`, signal `input()`/`output()`.
+- Not used: zoneless change detection and `resource()`/`rxResource()`, because both are still experimental in 19.
+- `PollingService` uses `timer(0, 5000)` + `switchMap`, pauses when the tab is hidden, and backs off exponentially on errors.
+- Visual design: minimalist `--sp-*` tokens ([docs/design/ui-theme.md](docs/design/ui-theme.md)).
 
 **Trade-offs.**
-- (+) Minimal boilerplate for a small state; easy to read in the walkthrough.
-- (+) Polling every 5 s meets the "within ~5 s" demo goal with no server push infrastructure; it is stateless and survives backend restarts.
-- (−) Polling sends requests when nothing has changed (50 users at 5 s ≈ 10 req/s, covered by the k6 target p95 < 200 ms).
-- (−) If state grows (more domains, optimistic updates), moving to SignalStore would be the next step.
+- (+) Supported framework version; stable signal APIs make components smaller and easier to explain.
+- (+) Minimal boilerplate for a small state; polling every 5 s meets the "within ~5 s" goal with no push infrastructure.
+- (−) Deviates from the brief's "Angular 17"; justified here. The patterns are the same, with newer syntax.
+- (−) Host Node 26 is unsupported, so the developer must use the Docker toolchain (or nvm).
+- (−) Polling sends requests when nothing has changed (50 users at 5 s ≈ 10 req/s, covered by the k6 target).
 
 ---
 
@@ -270,3 +339,27 @@ All ADRs below were recorded in SE-01 on 2026-11-03. They rest on the proposed d
 - (+) No unauthenticated write-to-disk endpoint.
 - (−) A custom format instead of the RFC 9457 standard; tools that expect `ProblemDetail` need a mapping.
 - (−) Browser-only failures (JS crashes, backend unreachable) are not recorded centrally in the MVP; they are visible only in DevTools until hosted error tracking is added.
+
+---
+
+## ADR-10: Free-tier LLM provider: Groq default, Ollama offline
+
+**Status:** Accepted · 2026-11-06
+
+**Context.** The early stage must cost nothing. `LLMGateway` (Addendum B) supports Gemini, Groq and Ollama. The demo needs low latency (the ≤ 5 s loop goal) and must survive rate limits. The key comes only from `LLM_API_KEY`.
+
+**Options.**
+1. **Groq free tier** (OpenAI-compatible, Llama 3.x): very fast, no card required, but limited requests and tokens per minute and per day.
+2. **Gemini free tier** (Flash models via AI Studio key): generous, native JSON mode, but free-tier prompts may be used by Google to improve products, and it has its own rate limits.
+3. **Ollama local** (e.g. `llama3.1:8b`): free and offline with no limits, but slower on a laptop and a ~5 GB model download.
+
+**Decision.** Default **Groq** (`LLM_PROVIDER=groq`, `LLM_BASE_URL=https://api.groq.com`, a current Llama 3.x "instant" model chosen at setup time). **Ollama** is the offline/backup option, **Gemini** stays an alternative behind the same gateway, and **WireMock** (`llm-sim`) is used for tests. The default strategy stays `rule`, so the app runs with no key at all.
+
+**Trade-offs.**
+- (+) Zero cost; fast responses keep manual suggests well under the 10.5 s bound.
+- (+) Switching provider is configuration only (`LLM_PROVIDER`, `LLM_MODEL`, `LLM_BASE_URL`).
+- (−) Free-tier quotas can be exhausted mid-demo. Mitigated by the 30 calls/min budget, dedupe before the call, and rule fallback with `RATE_LIMITED` / `BUDGET_EXCEEDED` (ADR-4).
+- (−) Model names and limits change. They are not hard-coded; `.env.example` holds placeholders.
+- (−) A free tier is not suitable for production data. Production uses a paid tier with a data-processing agreement (plan §I).
+
+**Update (2026-11-06).** Groq retired the Llama 3.1 instant model on this account (the call returned `model_not_found`). The default is now **`openai/gpt-oss-20b`** (about 0.8 s, valid JSON mode); `openai/gpt-oss-120b` is the higher-quality option. This proves the configuration-only switch works: no code changed. Host runs read the repo-root `.env` via `spring.config.import`, so the key lives in one gitignored file; Docker passes it as an environment variable.

@@ -1,0 +1,35 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/stockpulse}
+    username: ${DB_USERNAME:stockpulse}
+    password: ${DB_PASSWORD:}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:stockpulse}
+    password: ${RABBITMQ_PASSWORD:}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+    listener:
+      simple:
+        concurrency: 2
+        max-concurrency: 4
+        prefetch: 10
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1s
+          multiplier: 2
+          max-interval: 4s
+
+management:
+  health:
+    rabbit:
+      enabled: true
+
+stockpulse:
+  messaging:
+    mode: ${STOCKPULSE_MESSAGING_MODE:rabbitmq}

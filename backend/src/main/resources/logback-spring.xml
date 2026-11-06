@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ADR-9 / observability §3: four JSON Lines files in ${LOG_DIR} plus a readable console. -->
+<configuration>
+  <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+  <springProperty scope="context" name="LOG_DIR" source="stockpulse.logging.dir" defaultValue="logs"/>
+
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} %-5level [%X{traceId:-}] %logger{36} - %msg %kvp%n</pattern>
+    </encoder>
+  </appender>
+
+  <appender name="APP_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_DIR}/stockpulse-backend.log</file>
+    <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+      <fileNamePattern>${LOG_DIR}/stockpulse-backend.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+      <maxFileSize>20MB</maxFileSize><maxHistory>7</maxHistory><totalSizeCap>200MB</totalSizeCap>
+    </rollingPolicy>
+    <encoder class="org.springframework.boot.logging.logback.StructuredLogEncoder">
+      <format>ecs</format><charset>UTF-8</charset>
+    </encoder>
+  </appender>
+
+  <appender name="FAILURES_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_DIR}/stockpulse-backend-failures.log</file>
+    <filter class="ch.qos.logback.classic.filter.ThresholdFilter"><level>WARN</level></filter>
+    <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+      <fileNamePattern>${LOG_DIR}/stockpulse-backend-failures.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+      <maxFileSize>20MB</maxFileSize><maxHistory>14</maxHistory><totalSizeCap>200MB</totalSizeCap>
+    </rollingPolicy>
+    <encoder class="org.springframework.boot.logging.logback.StructuredLogEncoder">
+      <format>ecs</format><charset>UTF-8</charset>
+    </encoder>
+  </appender>
+
+  <appender name="ACCESS_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_DIR}/stockpulse-access.log</file>
+    <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+      <fileNamePattern>${LOG_DIR}/stockpulse-access.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+      <maxFileSize>20MB</maxFileSize><maxHistory>7</maxHistory><totalSizeCap>200MB</totalSizeCap>
+    </rollingPolicy>
+    <encoder class="org.springframework.boot.logging.logback.StructuredLogEncoder">
+      <format>ecs</format><charset>UTF-8</charset>
+    </encoder>
+  </appender>
+
+  <appender name="AUDIT_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_DIR}/stockpulse-audit.log</file>
+    <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+      <fileNamePattern>${LOG_DIR}/stockpulse-audit.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+      <maxFileSize>20MB</maxFileSize><maxHistory>30</maxHistory><totalSizeCap>500MB</totalSizeCap>
+    </rollingPolicy>
+    <encoder class="org.springframework.boot.logging.logback.StructuredLogEncoder">
+      <format>ecs</format><charset>UTF-8</charset>
+    </encoder>
+  </appender>
+
+  <logger name="stockpulse.access" level="INFO" additivity="false">
+    <appender-ref ref="ACCESS_FILE"/>
+  </logger>
+  <logger name="stockpulse.audit" level="INFO" additivity="true">
+    <appender-ref ref="AUDIT_FILE"/>
+  </logger>
+
+  <root level="INFO">
+    <appender-ref ref="CONSOLE"/>
+    <appender-ref ref="APP_FILE"/>
+    <appender-ref ref="FAILURES_FILE"/>
+  </root>
+</configuration>

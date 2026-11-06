@@ -1,0 +1,96 @@
+spring:
+  application:
+    name: stockpulse-backend
+  profiles:
+    default: local
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.jdbc.time_zone: UTC
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+    default-property-inclusion: always
+    serialization:
+      write-dates-as-timestamps: false
+  mvc:
+    problemdetails:
+      enabled: false
+  threads:
+    virtual:
+      enabled: false
+
+server:
+  port: 8080
+  error:
+    whitelabel:
+      enabled: false
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+    include-exception: false
+
+# Swagger UI at /swagger-ui.html renders ONLY contracts/openapi.yaml (copied to /openapi.yaml at
+# build): contract-first, the hand-written spec is the documentation. springdoc needs its own
+# api-docs endpoint for the UI wiring, so it stays on at a non-advertised path (useful to spot
+# drift between code and contract) but is never shown in the UI.
+springdoc:
+  api-docs:
+    path: /v3/api-docs-generated
+  swagger-ui:
+    url: /openapi.yaml
+    path: /swagger-ui.html
+    try-it-out-enabled: true
+    display-request-duration: true
+    operations-sorter: alpha
+    tags-sorter: alpha
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  health:
+    rabbit:
+      enabled: false
+
+stockpulse:
+  logging:
+    dir: logs
+  cors:
+    allowed-origins: ${STOCKPULSE_CORS_ALLOWED_ORIGINS:http://localhost:4200}
+  messaging:
+    # in-process (local H2, zero setup) | rabbitmq (Docker / postgres profile). ADR-5.
+    mode: in-process
+  outbox:
+    sweep-interval-ms: 5000
+    max-attempts: 10
+  trigger:
+    spike-multiplier: 3.0
+    rule-velocity-multiplier: 2.0
+  pricing:
+    min-ratio: 0.5
+    max-ratio: 2.0
+  reorder:
+    max-quantity: 10000
+    cover-multiplier: 3
+    default-lead-time-days: 7
+  strategy:
+    default-pricing: rule
+    default-reorder: rule
+
+llm:
+  provider: ${LLM_PROVIDER:groq}
+  model: ${LLM_MODEL:}
+  base-url: ${LLM_BASE_URL:https://api.groq.com}
+  api-key: ${LLM_API_KEY:}
+  timeout:
+    connect-ms: 2000
+    read-ms: 10000
+  max-calls-per-minute: 30
+  breaker:
+    failure-rate-threshold: 50
+    sliding-window-size: 20
+    open-seconds: 30

@@ -1,0 +1,10 @@
+# Root build context is used by backend/Dockerfile only.
+.git
+.env
+.env.*
+!.env.example
+**/node_modules
+**/target
+**/logs
+frontend
+e2e

@@ -4,8 +4,8 @@ AI inventory and dynamic pricing engine. When stock or demand changes, the syste
 
 ## Stack
 - Backend: Java 21, Spring Boot 3.x (MVC, JPA, Flyway), PostgreSQL 16 / H2 (`local` profile). Lives in `/backend`.
-- Frontend: Angular 17 (standalone, signals + RxJS, Angular Material). Lives in `/frontend`.
-- LLM: Gemini / Groq / Ollama through `LLMGateway`. The key comes from the `LLM_API_KEY` environment variable only.
+- Frontend: Angular 19 (standalone, signals + RxJS, Angular Material 19, minimalist `--sp-*` theme). Lives in `/frontend`. Tooling runs on Node 22 in Docker (host Node 26 is unsupported by Angular 19).
+- LLM: Gemini / Groq / Ollama through `LLMGateway`; free tier, Groq by default (ADR-10). The key comes from the `LLM_API_KEY` environment variable only.
 
 ## Where things are
 | Path | What |
@@ -35,7 +35,7 @@ AI inventory and dynamic pricing engine. When stock or demand changes, the syste
 ## Commands
 First time: `cp .env.example .env` and set `POSTGRES_PASSWORD` and `RABBITMQ_PASSWORD` for Docker (never commit `.env`).
 
-**Docker (preferred; the host can keep Node 24, Angular tooling runs on Node 20 in containers)**
+**Docker (preferred; the host can keep Node 24/26, Angular 19 tooling runs on Node 22 in containers)**
 - Backend + PostgreSQL 16 + RabbitMQ: `docker compose up -d --build` → `curl localhost:8080/actuator/health` · RabbitMQ UI: http://localhost:15672 (credentials from `.env`) · stop: `docker compose down` (keeps volumes).
 - Frontend dev server (after FE-01): `docker compose --profile frontend up` → http://localhost:4200
 - Local LLM: `docker compose --profile ai-local up -d`, then `docker compose exec ollama ollama pull llama3.1:8b` (set `LLM_BASE_URL=http://ollama:11434`)
@@ -53,5 +53,5 @@ First time: `cp .env.example .env` and set `POSTGRES_PASSWORD` and `RABBITMQ_PAS
 - Lint: `npx --yes @stoplight/spectral-cli@6 lint contracts/openapi.yaml` and `npx --yes @redocly/cli@1 lint contracts/openapi.yaml`
 
 **Frontend / E2E (after FE-01 / QA-05)**
-- Unit tests: FE-01 defines the containerised command (`node:20-alpine` has no Chrome, so Karma needs a Chrome-capable image). CI uses Node 20: `npm test -- --watch=false --browsers=ChromeHeadless`
+- Unit tests: FE-01 defines the containerised command (`node:22-alpine` has no Chrome, so Karma needs a Chrome-capable image). CI uses Node 22: `npm test -- --watch=false --browsers=ChromeHeadless`
 - E2E: `cd e2e && npx playwright test`

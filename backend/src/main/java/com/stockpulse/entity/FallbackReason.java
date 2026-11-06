@@ -1,0 +1,13 @@
+package com.stockpulse.entity;
+
+public enum FallbackReason {
+  TIMEOUT,
+  RATE_LIMITED,
+  PROVIDER_ERROR,
+  EMPTY_RESPONSE,
+  INVALID_JSON,
+  OUT_OF_BOUNDS,
+  CIRCUIT_OPEN,
+  BUDGET_EXCEEDED,
+  NOT_CONFIGURED
+}

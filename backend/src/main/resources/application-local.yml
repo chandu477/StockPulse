@@ -1,0 +1,21 @@
+# Host runs read the repo-root .env (KEY=VALUE is valid properties syntax), so LLM_API_KEY only has to
+# be set in one gitignored file. Real environment variables still take precedence.
+spring:
+  config:
+    import: optional:file:../.env[.properties]
+  datasource:
+    url: jdbc:h2:mem:stockpulse;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  rabbitmq:
+    listener:
+      simple:
+        auto-startup: false
+
+stockpulse:
+  messaging:
+    mode: in-process

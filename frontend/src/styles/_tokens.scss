@@ -1,0 +1,76 @@
+// Design tokens: docs/design/ui-theme.md (white & blue). Components use only these --sp-* variables.
+:root {
+  --sp-bg: #ffffff;
+  --sp-surface: #f5f8fe;
+  --sp-surface-strong: #eaf1fd;
+  --sp-border: #e2e8f0;
+  --sp-border-strong: #cbd5e1;
+  --sp-text: #0f172a;
+  --sp-text-muted: #64748b;
+  --sp-text-faint: #94a3b8;
+
+  --sp-accent: #2563eb;
+  --sp-accent-strong: #1d4ed8;
+  --sp-accent-soft: #eff5ff;
+  --sp-accent-fg: #ffffff;
+  --sp-focus: #2563eb;
+
+  --sp-up: #15803d;
+  --sp-down: #b91c1c;
+  --sp-hold: #64748b;
+  --sp-low: #b45309;
+  --sp-spike: #7c3aed;
+  --sp-manual: #475569;
+  --sp-fallback: #b45309;
+
+  --sp-font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --sp-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --sp-text-xs: 12px;
+  --sp-text-sm: 13px;
+  --sp-text-md: 14px;
+  --sp-text-lg: 16px;
+  --sp-text-xl: 20px;
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-radius: 8px;
+  --sp-radius-sm: 4px;
+  --sp-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+  --sp-ease: 120ms ease-out;
+}
+
+@mixin dark-tokens {
+  --sp-bg: #0b1220;
+  --sp-surface: #111a2e;
+  --sp-surface-strong: #16223b;
+  --sp-border: #1e293b;
+  --sp-border-strong: #334155;
+  --sp-text: #e2e8f0;
+  --sp-text-muted: #94a3b8;
+  --sp-text-faint: #64748b;
+  --sp-accent: #60a5fa;
+  --sp-accent-strong: #93c5fd;
+  --sp-accent-soft: #13233f;
+  --sp-accent-fg: #0b1220;
+  --sp-focus: #60a5fa;
+  --sp-up: #4ade80;
+  --sp-down: #f87171;
+  --sp-low: #fbbf24;
+  --sp-spike: #a78bfa;
+  --sp-fallback: #fbbf24;
+  --sp-manual: #94a3b8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    @include dark-tokens;
+  }
+}
+
+:root[data-theme='dark'] {
+  @include dark-tokens;
+}

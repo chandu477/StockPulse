@@ -1,0 +1,8 @@
+{
+  "/api/v1": {
+    "target": "http://mock-api:4010",
+    "secure": false,
+    "changeOrigin": true,
+    "pathRewrite": { "^/api/v1": "" }
+  }
+}

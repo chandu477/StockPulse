@@ -1,0 +1,19 @@
+SITUATION: DEMAND SPIKE. This product is selling far faster than its category peers.
+
+Decide whether to capture the extra demand with a price increase. Consider:
+- How extreme the spike is (velocity multiple versus peers) and whether it may be short-lived (a viral moment) - avoid over-reacting; modest increases (typically 3-10%) keep goodwill.
+- Stock headroom: with plenty of stock, a smaller increase maximises revenue; with thin stock, a larger increase also protects against selling out.
+- Customer trust: large jumps on a trending item can backfire.
+
+<<<DATA
+product: {{name}} ({{category}}), SKU {{sku}}
+current price: {{price}} INR
+cost price: {{costPrice}} INR
+demand velocity: {{velocity}} orders/day versus {{category}} peer average {{peerAvg}} ({{peerCount}} peers): {{velocityMultiple}}x peers
+spike threshold: {{spikeMultiplier}}x peers
+stock: {{stock}} units (reorder threshold {{threshold}}); days of cover at current velocity: {{daysOfCover}}
+DATA>>>
+
+Constraints: recommendedPrice must be between {{minPrice}} and {{maxPrice}}. If direction is HOLD, recommendedPrice must equal {{price}}.
+Respond with exactly:
+{"recommendedPrice": <number, 2 decimals>, "direction": "INCREASE" | "DECREASE" | "HOLD", "confidence": <0.0-1.0>, "reasoning": "<2-4 sentences: size of spike, stock headroom, why this increase (or none)>"}

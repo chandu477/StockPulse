@@ -1,0 +1,599 @@
+openapi: 3.1.0
+info:
+  title: StockPulse API
+  version: 1.0.0
+  summary: AI inventory and dynamic pricing engine.
+  description: |
+    Contract v1 (SE-02). Stock and order changes trigger pricing and reorder **suggestions**
+    asynchronously; a merchandiser accepts or rejects them. Prices change only by accepting a
+    pricing suggestion. Product status is derived by the server.
+
+    Every non-2xx response uses `ApiErrorResponse`.
+  contact:
+    name: StockPulse team
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+security: []  # No authentication in the MVP (plan Q-13, ADR-6). Production adds OAuth2 bearer (plan §I).
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local backend
+tags:
+  - name: products
+    description: Catalog, stock and simulated orders
+  - name: recommendations
+    description: On-demand suggestion generation
+  - name: pricing-suggestions
+    description: Pricing suggestion review
+  - name: reorder-suggestions
+    description: Reorder suggestion review
+  - name: admin
+    description: Runtime strategy switching
+
+paths:
+  /products:
+    post:
+      tags: [products]
+      operationId: createProduct
+      summary: Create a product
+      description: 'Creates a product. Status is derived from stock (OUT_OF_STOCK when 0, else ACTIVE).'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateProductRequest' }
+      responses:
+        '201':
+          description: Created
+          headers:
+            Location:
+              description: URL of the new product
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    get:
+      tags: [products]
+      operationId: listProducts
+      summary: List products
+      description: 'Optional filters by derived status and category.'
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/ProductStatus' }
+        - name: category
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/Category' }
+      responses:
+        '200':
+          description: Products ordered by SKU
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Product' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /products/{productId}:
+    parameters:
+      - $ref: '#/components/parameters/ProductId'
+    get:
+      tags: [products]
+      operationId: getProduct
+      summary: Get one product
+      description: 'Returns one product with its pending suggestion counts.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /products/{productId}/stock:
+    parameters:
+      - $ref: '#/components/parameters/ProductId'
+    patch:
+      tags: [products]
+      operationId: updateStock
+      summary: Set the stock level
+      description: Returns immediately. If the new level crosses a trigger, suggestions are generated asynchronously.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StockUpdateRequest' }
+      responses:
+        '200':
+          description: Updated product
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /products/{productId}/orders:
+    parameters:
+      - $ref: '#/components/parameters/ProductId'
+    post:
+      tags: [products]
+      operationId: createOrder
+      summary: Simulate a sale
+      description: |
+        Decrements stock and increases demand velocity by `quantity`. Returns immediately;
+        `INVENTORY_LOW` / `DEMAND_SPIKE` suggestions are generated asynchronously. Each product
+        has at most one PENDING pricing and one PENDING reorder suggestion: the same trigger again
+        is de-duplicated, a different trigger recalculates and supersedes (DEMAND_SPIKE wins when
+        both fire).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderRequest' }
+      responses:
+        '201':
+          description: Order recorded; updated product returned
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /products/{productId}/suggest-pricing:
+    parameters:
+      - $ref: '#/components/parameters/ProductId'
+    post:
+      tags: [recommendations]
+      operationId: suggestPricing
+      summary: Recalculate the pricing suggestion now (triggerReason MANUAL)
+      description: 'Runs the active pricing strategy synchronously (bounded at about 10.5 s; AI failure falls back to rules) and supersedes the product''s current PENDING pricing suggestion, so each product has one recommendation.'
+      responses:
+        '201':
+          description: Recalculated suggestion (any previous PENDING one is now SUPERSEDED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PricingSuggestion' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /products/{productId}/suggest-pricing/stream:
+    parameters:
+      - $ref: '#/components/parameters/ProductId'
+    post:
+      tags: [recommendations]
+      operationId: suggestPricingStream
+      summary: (Bonus) Stream AI reasoning, then the suggestion, as Server-Sent Events
+      description: |
+        Events: `token` (data = text chunk), `suggestion` (data = PricingSuggestion JSON),
+        `error` (data = ApiErrorResponse JSON). The stream ends after `suggestion` or `error`.
+      responses:
+        '200':
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /products/{productId}/suggest-reorder:
+    parameters:
+      - $ref: '#/components/parameters/ProductId'
+    post:
+      tags: [recommendations]
+      operationId: suggestReorder
+      summary: Recalculate the reorder suggestion now (triggerReason MANUAL)
+      description: 'Runs the active reorder strategy synchronously (bounded at about 10.5 s; AI failure falls back to rules) and supersedes the product''s current PENDING reorder suggestion, so each product has one recommendation.'
+      responses:
+        '201':
+          description: Recalculated suggestion (any previous PENDING one is now SUPERSEDED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReorderSuggestion' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /products/{productId}/price-history:
+    parameters:
+      - $ref: '#/components/parameters/ProductId'
+    get:
+      tags: [products]
+      operationId: getPriceHistory
+      summary: (UI ceiling) Accepted price changes, oldest first
+      description: 'Built from accepted pricing suggestions.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PricePoint' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /pricing-suggestions:
+    get:
+      tags: [pricing-suggestions]
+      operationId: listPricingSuggestions
+      summary: List pricing suggestions, newest first
+      description: 'Filter by status (e.g. PENDING for the review queue) and product.'
+      parameters:
+        - $ref: '#/components/parameters/SuggestionStatusQuery'
+        - $ref: '#/components/parameters/ProductIdQuery'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PricingSuggestion' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /pricing-suggestions/{suggestionId}:
+    parameters:
+      - $ref: '#/components/parameters/SuggestionId'
+    patch:
+      tags: [pricing-suggestions]
+      operationId: decidePricingSuggestion
+      summary: Accept or reject a pricing suggestion
+      description: |
+        ACCEPTED sets the product's `currentPrice` to `recommendedPrice` and marks other PENDING
+        pricing suggestions for the product SUPERSEDED, in one transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionRequest' }
+      responses:
+        '200':
+          description: Decided suggestion
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PricingSuggestion' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /reorder-suggestions:
+    get:
+      tags: [reorder-suggestions]
+      operationId: listReorderSuggestions
+      summary: List reorder suggestions, newest first
+      description: 'Filter by status (e.g. PENDING for the review queue) and product.'
+      parameters:
+        - $ref: '#/components/parameters/SuggestionStatusQuery'
+        - $ref: '#/components/parameters/ProductIdQuery'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ReorderSuggestion' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /reorder-suggestions/{suggestionId}:
+    parameters:
+      - $ref: '#/components/parameters/SuggestionId'
+    patch:
+      tags: [reorder-suggestions]
+      operationId: decideReorderSuggestion
+      summary: Accept or reject a reorder suggestion
+      description: |
+        ACCEPTED increases the product's `stockLevel` by `recommendedQuantity` (simulated inbound
+        shipment) and marks other PENDING reorder suggestions for the product SUPERSEDED.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionRequest' }
+      responses:
+        '200':
+          description: Decided suggestion
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReorderSuggestion' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /admin/strategies:
+    get:
+      tags: [admin]
+      operationId: getStrategies
+      summary: Active and available strategies
+      description: 'Returns the active strategy keys and every registered key.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StrategySettings' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    put:
+      tags: [admin]
+      operationId: updateStrategies
+      summary: Switch the active strategies at runtime (no restart)
+      description: 'Takes effect on the next call (HTTP and async). Persisted across restarts. Unknown key → 400 UNKNOWN_STRATEGY.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StrategyUpdateRequest' }
+      responses:
+        '200':
+          description: Updated settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StrategySettings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+components:
+  parameters:
+    ProductId:
+      name: productId
+      in: path
+      required: true
+      schema: { type: string, example: PRD-003 }
+    SuggestionId:
+      name: suggestionId
+      in: path
+      required: true
+      schema: { type: integer, format: int64, minimum: 1 }
+    SuggestionStatusQuery:
+      name: status
+      in: query
+      required: false
+      schema: { $ref: '#/components/schemas/SuggestionStatus' }
+    ProductIdQuery:
+      name: productId
+      in: query
+      required: false
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: VALIDATION_FAILED or UNKNOWN_STRATEGY
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiErrorResponse' }
+    NotFound:
+      description: PRODUCT_NOT_FOUND or SUGGESTION_NOT_FOUND
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiErrorResponse' }
+    Conflict:
+      description: DUPLICATE_SKU, INSUFFICIENT_STOCK, NOT_PENDING or CONCURRENT_MODIFICATION
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiErrorResponse' }
+    InternalError:
+      description: INTERNAL_ERROR
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiErrorResponse' }
+
+  schemas:
+    Category:
+      type: string
+      enum: [ELECTRONICS, APPAREL, HOME]
+    ProductStatus:
+      type: string
+      description: Derived by the server, never set by clients.
+      enum: [ACTIVE, PRICE_REVIEW_PENDING, OUT_OF_STOCK]
+    SuggestionStatus:
+      type: string
+      enum: [PENDING, ACCEPTED, REJECTED, SUPERSEDED]
+    TriggerReason:
+      type: string
+      enum: [INITIAL, INVENTORY_LOW, DEMAND_SPIKE, MANUAL]
+    Direction:
+      type: string
+      enum: [INCREASE, DECREASE, HOLD]
+    SuggestionSource:
+      type: string
+      description: AI = model output accepted; RULE = rule strategy active; RULE_FALLBACK = AI failed, rule used.
+      enum: [AI, RULE, RULE_FALLBACK]
+    FallbackReason:
+      type: string
+      enum: [TIMEOUT, RATE_LIMITED, PROVIDER_ERROR, EMPTY_RESPONSE, INVALID_JSON, OUT_OF_BOUNDS, CIRCUIT_OPEN, BUDGET_EXCEEDED, NOT_CONFIGURED]
+    Money:
+      type: number
+      description: Amount in the store currency, 2 decimal places.
+      minimum: 0
+      example: 24.99
+
+    CreateProductRequest:
+      type: object
+      additionalProperties: false
+      required: [sku, name, category, currentPrice, stockLevel, reorderThreshold]
+      properties:
+        sku: { type: string, minLength: 1, maxLength: 64, example: SKU-HOME-003 }
+        name: { type: string, minLength: 1, maxLength: 200, example: Linen Throw Blanket }
+        category: { $ref: '#/components/schemas/Category' }
+        currentPrice: { $ref: '#/components/schemas/Money', exclusiveMinimum: 0 }
+        stockLevel: { type: integer, minimum: 0, example: 40 }
+        reorderThreshold: { type: integer, minimum: 0, example: 10 }
+        demandVelocity: { type: integer, minimum: 0, default: 0 }
+        costPrice:
+          description: Sprint 2 seam (margin). Optional.
+          oneOf:
+            - $ref: '#/components/schemas/Money'
+            - type: 'null'
+        supplierId:
+          description: Sprint 2 seam (supplier catalog). Optional.
+          type: [string, 'null']
+          maxLength: 64
+
+    Product:
+      type: object
+      required: [id, sku, name, category, currentPrice, stockLevel, reorderThreshold, demandVelocity, status,
+                 pendingPricingCount, pendingReorderCount, createdAt, updatedAt]
+      properties:
+        id: { type: string, example: PRD-003 }
+        sku: { type: string, example: SKU-APP-001 }
+        name: { type: string, example: Organic Cotton T-Shirt }
+        category: { $ref: '#/components/schemas/Category' }
+        currentPrice: { $ref: '#/components/schemas/Money' }
+        stockLevel: { type: integer, minimum: 0, example: 8 }
+        reorderThreshold: { type: integer, minimum: 0, example: 15 }
+        demandVelocity: { type: integer, minimum: 0, description: Orders counted toward velocity (MVP counter), example: 12 }
+        status: { $ref: '#/components/schemas/ProductStatus' }
+        costPrice:
+          oneOf:
+            - $ref: '#/components/schemas/Money'
+            - type: 'null'
+        marginFloor:
+          oneOf:
+            - $ref: '#/components/schemas/Money'
+            - type: 'null'
+        supplierId: { type: [string, 'null'] }
+        marginPct:
+          type: [number, 'null']
+          description: (currentPrice - costPrice) / currentPrice * 100, null when costPrice is null.
+        pendingPricingCount: { type: integer, minimum: 0 }
+        pendingReorderCount: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    StockUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [stockLevel]
+      properties:
+        stockLevel: { type: integer, minimum: 0, example: 5 }
+
+    OrderRequest:
+      type: object
+      additionalProperties: false
+      required: [quantity]
+      properties:
+        quantity: { type: integer, minimum: 1, maximum: 10000, example: 1 }
+
+    DecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ACCEPTED, REJECTED]
+        note: { type: [string, 'null'], maxLength: 500 }
+
+    SuggestionBase:
+      type: object
+      required: [id, productId, productName, sku, confidence, reasoning, status, triggerReason, source,
+                 strategyKey, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        productId: { type: string }
+        productName: { type: string }
+        sku: { type: string }
+        confidence: { type: number, minimum: 0, maximum: 1, example: 0.82 }
+        reasoning: { type: string, description: 'Plain text. Untrusted model output; render as text only.' }
+        status: { $ref: '#/components/schemas/SuggestionStatus' }
+        triggerReason: { $ref: '#/components/schemas/TriggerReason' }
+        source: { $ref: '#/components/schemas/SuggestionSource' }
+        strategyKey: { type: string, example: ai }
+        fallbackReason:
+          oneOf:
+            - $ref: '#/components/schemas/FallbackReason'
+            - type: 'null'
+        createdAt: { type: string, format: date-time }
+        decidedAt: { type: [string, 'null'], format: date-time }
+        decisionNote: { type: [string, 'null'] }
+
+    PricingSuggestion:
+      allOf:
+        - $ref: '#/components/schemas/SuggestionBase'
+        - type: object
+          required: [currentPrice, recommendedPrice, changePct, direction]
+          properties:
+            currentPrice: { $ref: '#/components/schemas/Money' }
+            recommendedPrice: { $ref: '#/components/schemas/Money' }
+            changePct: { type: number, description: Percentage change vs currentPrice, example: 10.0 }
+            direction: { $ref: '#/components/schemas/Direction' }
+
+    ReorderSuggestion:
+      allOf:
+        - $ref: '#/components/schemas/SuggestionBase'
+        - type: object
+          required: [currentStock, recommendedQuantity, leadTimeDays]
+          properties:
+            currentStock: { type: integer, minimum: 0 }
+            recommendedQuantity: { type: integer, minimum: 1, example: 37 }
+            leadTimeDays: { type: integer, minimum: 0, example: 7 }
+
+    PricePoint:
+      type: object
+      required: [at, price, suggestionId]
+      properties:
+        at: { type: string, format: date-time }
+        price: { $ref: '#/components/schemas/Money' }
+        suggestionId: { type: integer, format: int64 }
+
+    StrategyUpdateRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        pricing: { type: string, example: ai }
+        reorder: { type: string, example: rule }
+
+    StrategySettings:
+      type: object
+      required: [pricing, reorder, available]
+      properties:
+        pricing: { type: string, example: rule }
+        reorder: { type: string, example: rule }
+        available:
+          type: object
+          required: [pricing, reorder]
+          properties:
+            pricing: { type: array, items: { type: string }, example: [ai, rule] }
+            reorder: { type: array, items: { type: string }, example: [ai, rule] }
+
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field: { type: string }
+        message: { type: string }
+        rejectedValue: {}
+
+    ApiErrorResponse:
+      type: object
+      required: [timestamp, status, error, code, message, path, traceId, errors]
+      properties:
+        timestamp: { type: string, format: date-time }
+        status: { type: integer, example: 409 }
+        error: { type: string, example: Conflict }
+        code:
+          type: string
+          enum: [VALIDATION_FAILED, UNKNOWN_STRATEGY, PRODUCT_NOT_FOUND, SUGGESTION_NOT_FOUND, DUPLICATE_SKU,
+                 INSUFFICIENT_STOCK, NOT_PENDING, CONCURRENT_MODIFICATION, NOT_FOUND, METHOD_NOT_ALLOWED,
+                 INTERNAL_ERROR]
+        message: { type: string }
+        path: { type: string, example: /api/v1/pricing-suggestions/42 }
+        traceId: { type: string }
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/FieldError' }

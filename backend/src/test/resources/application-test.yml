@@ -1,0 +1,5 @@
+stockpulse:
+  logging:
+    dir: target/test-logs
+  outbox:
+    sweep-interval-ms: 1000
