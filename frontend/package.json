@@ -41,5 +41,8 @@
     "karma-jasmine-html-reporter": "~2.1.0",
     "typescript": "~5.7.2",
     "typescript-eslint": "8.33.1"
+  },
+  "engines": {
+    "node": "22.x"
   }
 }

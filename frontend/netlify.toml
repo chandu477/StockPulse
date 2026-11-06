@@ -1,0 +1,21 @@
+# Netlify: set the site's "Base directory" to `frontend`.
+[build]
+  command = "npm ci && npm run build"
+  publish = "dist/stockpulse-frontend/browser"
+
+[build.environment]
+  # Angular 19 supports Node 18.19+/20.11+/22 (not 24/26).
+  NODE_VERSION = "22"
+
+# Proxy the API to the backend (same-origin for the browser). Replace the host with your backend URL.
+[[redirects]]
+  from = "/api/*"
+  to = "https://stockpulse-backend.onrender.com/api/:splat"
+  status = 200
+  force = true
+
+# SPA fallback for Angular routes.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
